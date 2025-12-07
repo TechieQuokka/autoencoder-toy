@@ -8,7 +8,7 @@ model:
 # Dataset
 data:
   data_dir: './dataset'
-  batch_size: 128
+  batch_size: 512
   num_workers: 4
 
 # Training

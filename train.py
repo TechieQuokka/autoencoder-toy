@@ -7,6 +7,7 @@ import yaml
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+from torch.cuda.amp import GradScaler, autocast
 import numpy as np
 from tqdm import tqdm
 
@@ -68,7 +69,7 @@ def extract_all_features(model, dataloader, device):
     return all_features, all_true_labels, all_images
 
 
-def train_one_epoch(model, dataloader, criterion, optimizer, device):
+def train_one_epoch(model, dataloader, criterion, optimizer, device, scaler=None):
     """
     Train classifier for one epoch with pseudo-labels
 
@@ -78,6 +79,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
         criterion: Loss function (CrossEntropyLoss)
         optimizer: PyTorch optimizer
         device: cuda or cpu
+        scaler: GradScaler for mixed precision (optional)
 
     Returns:
         avg_loss: Average loss for the epoch
@@ -85,19 +87,28 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
     model.train()
     total_loss = 0.0
     num_batches = 0
+    use_amp = scaler is not None
 
     for images, pseudo_labels in dataloader:
-        images = images.to(device)
-        pseudo_labels = pseudo_labels.to(device)
+        images = images.to(device, non_blocking=True)
+        pseudo_labels = pseudo_labels.to(device, non_blocking=True)
 
-        # Forward pass
-        optimizer.zero_grad()
-        logits = model(images)
-        loss = criterion(logits, pseudo_labels)
+        optimizer.zero_grad(set_to_none=True)
 
-        # Backward pass
-        loss.backward()
-        optimizer.step()
+        # Forward pass with AMP
+        if use_amp:
+            with autocast():
+                logits = model(images)
+                loss = criterion(logits, pseudo_labels)
+            # Backward pass with scaled gradients
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            logits = model(images)
+            loss = criterion(logits, pseudo_labels)
+            loss.backward()
+            optimizer.step()
 
         total_loss += loss.item()
         num_batches += 1
@@ -202,6 +213,12 @@ def main():
             weight_decay=config['training']['weight_decay']
         )
 
+    # Initialize GradScaler for mixed precision training
+    use_amp = device.type == 'cuda'
+    scaler = GradScaler() if use_amp else None
+    if use_amp:
+        print("Mixed Precision (AMP) enabled")
+
     # Initialize clustering
     clustering = KMeansClustering(
         n_clusters=config['clustering']['n_clusters'],
@@ -229,6 +246,17 @@ def main():
     print("Starting Iterative Self-Supervised Training")
     print("="*80)
 
+    # Cache all images once before the loop (avoid repeated GPU→CPU copies)
+    print("\nCaching training images...")
+    cached_images = []
+    cached_labels = []
+    for images, labels in tqdm(train_loader, desc="Caching images", leave=False):
+        cached_images.append(images)
+        cached_labels.append(labels)
+    cached_images = torch.cat(cached_images, dim=0)
+    cached_labels = torch.cat(cached_labels, dim=0).numpy()
+    print(f"Cached {len(cached_images)} images\n")
+
     # Main Iterative Loop
     for iteration in range(config['training']['num_iterations']):
         print(f"\n{'='*80}")
@@ -237,9 +265,15 @@ def main():
 
         # ===== STEP 1: Feature Extraction =====
         print("Step 1: Extracting features from training set...")
-        all_features, all_true_labels, all_images = extract_all_features(
-            model, train_loader, device
-        )
+        model.eval()
+        all_features = []
+        with torch.no_grad():
+            for i in range(0, len(cached_images), config['data']['batch_size']):
+                batch = cached_images[i:i + config['data']['batch_size']].to(device, non_blocking=True)
+                features = model.extract_features(batch)
+                all_features.append(features.cpu())
+        all_features = torch.cat(all_features, dim=0).numpy()
+        all_true_labels = cached_labels
         print(f"  Extracted features shape: {all_features.shape}")
 
         # ===== STEP 2: K-means Clustering =====
@@ -281,9 +315,9 @@ def main():
         print(f"\nStep 3: Training classifier for {config['training']['epochs_per_iteration']} epochs...")
 
         # Create DataLoader with pseudo-labels
-        # Use original images, not features, for better learning
+        # Use cached images with new pseudo-labels
         train_dataset_labeled = TensorDataset(
-            all_images,
+            cached_images,
             torch.from_numpy(pseudo_labels).long()
         )
 
@@ -291,13 +325,14 @@ def main():
             train_dataset_labeled,
             batch_size=config['data']['batch_size'],
             shuffle=True,
-            num_workers=0,  # Already in memory
-            pin_memory=True
+            num_workers=config['data']['num_workers'],
+            pin_memory=True,
+            persistent_workers=True if config['data']['num_workers'] > 0 else False
         )
 
         epoch_losses = []
         for epoch in range(config['training']['epochs_per_iteration']):
-            avg_loss = train_one_epoch(model, labeled_loader, criterion, optimizer, device)
+            avg_loss = train_one_epoch(model, labeled_loader, criterion, optimizer, device, scaler)
             epoch_losses.append(avg_loss)
 
             if (epoch + 1) % 10 == 0:
