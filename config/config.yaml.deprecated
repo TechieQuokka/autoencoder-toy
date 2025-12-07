@@ -1,0 +1,87 @@
+# Self-Supervised Image Classification Configuration
+# Enhanced with Contrastive Learning - v2 (Optimized)
+
+# Model Architecture
+model:
+  feature_dim: 256
+  num_classes: 10
+  projection_dim: 128    # 대조 학습 프로젝션 차원
+
+# Dataset
+data:
+  data_dir: './dataset'
+  batch_size: 320         # RTX 3060 12GB 최적화 (512→320)
+  num_workers: 6          # RAM 24GB 활용 (4→6)
+  pin_memory: true        # WSL2 GPU 전송 최적화
+  augmentation: 'medium'  # 'strong', 'medium', 'weak' - Fashion-MNIST에는 medium이 최적
+
+# Training
+training:
+  num_iterations: 30              # 더 많은 iteration
+  epochs_per_iteration: 20        # epoch 수 조정
+  learning_rate: 0.001            # 학습률 증가
+  weight_decay: 0.0001
+  optimizer: 'adam'
+
+  # Learning Rate Scheduler
+  scheduler:
+    enabled: true
+    type: 'cosine'               # 'cosine', 'step', 'plateau'
+    warmup_epochs: 3
+    min_lr: 0.00001
+
+# Contrastive Learning (v3 - Fashion-MNIST Optimized)
+contrastive:
+  enabled: true
+  temperature: 0.25              # 더 관대한 temperature (0.1은 너무 가혹함)
+  pretrain_epochs: 80            # 더 긴 사전훈련 (50 → 80)
+  instance_weight: 1.0           # Instance-level 대조 손실 가중치
+  cluster_weight: 0.3            # Cluster-level 대조 손실 가중치
+  projection_hidden_dim: 512     # 더 큰 프로젝션 헤드
+
+# Confidence Filtering (v3 - Fashion-MNIST Optimized)
+confidence:
+  enabled: true
+  threshold: 0.4                 # 더 선택적 (0.3 → 0.4, 좋은 특징으로 더 나은 클러스터링)
+  soft_filtering: true           # true: 가중치 사용, false: 하드 필터링
+  warmup_iterations: 5           # 더 긴 워밍업
+
+# Clustering
+clustering:
+  n_clusters: 10
+  use_gpu_clustering: true
+  max_iter: 300
+  n_init: 30                     # 더 많은 초기화 시도
+
+# Convergence
+convergence:
+  label_stability_threshold: 0.995  # 더 높은 threshold
+  early_stopping: false              # 조기 수렴 비활성화 (전체 iteration 수행)
+  patience: 15                       # 더 긴 patience
+  min_iterations: 20                 # 최소 20 iterations 필요
+
+# Evaluation
+evaluation:
+  eval_every_iteration: true
+  save_best_model: true
+  compute_tsne: false
+
+# Paths
+paths:
+  checkpoint_dir: './checkpoints'
+  results_dir: './results'
+  logs_dir: './logs'
+
+# Reproducibility
+seed: 42
+
+# Device
+device: 'cuda'
+
+# GPU Optimization (RTX 3060 12GB + WSL2)
+gpu:
+  mixed_precision: true        # FP16 학습으로 메모리 절약
+  cudnn_benchmark: true        # cuDNN 자동 최적화
+  gradient_accumulation: 2     # 효과적 batch_size = 320 * 2 = 640
+  empty_cache_freq: 10         # N epoch마다 캐시 비우기
+  memory_efficient: true       # 메모리 효율 모드

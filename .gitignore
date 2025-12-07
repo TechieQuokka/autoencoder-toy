@@ -35,21 +35,31 @@ env/
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Model checkpoints (keep structure but ignore large files)
-checkpoints/*.pth
-checkpoints/*.pt
-checkpoints/*.ckpt
+# Model checkpoints (large binary files)
+checkpoints/
+checkpoints_stl10/
+*.pth
+*.pt
+*.ckpt
+*.pkl
+*.pickle
+*.h5
+*.hdf5
 
 # Results and logs
-results/*.png
-results/*.jpg
-results/*.csv
+results/
+results_stl10/
+logs/
+logs_stl10/
 *.log
 
+# Large data files
+*.npy
+*.npz
+*.bin
+
 # Dataset (usually too large)
-dataset/data/
-dataset/*.wav
-dataset/*.mp3
+dataset/
 
 # OS
 .DS_Store

@@ -20,14 +20,17 @@ class SelfSupervisedClassifier(nn.Module):
         2. Inference: Extract features + classify new images
     """
 
-    def __init__(self, num_classes=10, feature_dim=256):
+    def __init__(self, num_classes=10, feature_dim=256, encoder=None):
         super(SelfSupervisedClassifier, self).__init__()
 
         self.num_classes = num_classes
         self.feature_dim = feature_dim
 
-        # Feature extraction backbone
-        self.feature_extractor = FeatureExtractor(feature_dim=feature_dim)
+        # Feature extraction backbone (use provided encoder or default)
+        if encoder is not None:
+            self.feature_extractor = encoder
+        else:
+            self.feature_extractor = FeatureExtractor(feature_dim=feature_dim)
 
         # Classification head
         # Maps features to class logits

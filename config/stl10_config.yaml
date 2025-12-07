@@ -1,0 +1,98 @@
+# STL-10 Self-Supervised Image Classification Configuration
+# Optimized for 96x96 RGB natural images
+
+# Model Architecture
+model:
+  feature_dim: 512           # Larger feature dimension for RGB
+  num_classes: 10
+  projection_dim: 128        # Contrastive learning projection dimension
+  encoder_type: 'stl10'      # Use STL10Encoder
+
+# Dataset
+data:
+  data_dir: './dataset'
+  dataset_name: 'stl10'      # STL-10 dataset
+  batch_size: 128            # RTX 3060 12GB 최적화 (96x96 RGB는 메모리 많이 사용)
+  num_workers: 6             # RAM 24GB 활용
+  pin_memory: true           # WSL2 GPU 전송 최적화
+  augmentation: 'strong'     # Strong augmentation for natural images
+  image_size: 96             # STL-10 image size
+  use_unlabeled: true        # Use 100k unlabeled images
+
+# Training
+training:
+  num_iterations: 30
+  epochs_per_iteration: 15   # Fewer epochs per iteration (larger dataset)
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  optimizer: 'adam'
+
+  # Learning Rate Scheduler
+  scheduler:
+    enabled: true
+    type: 'cosine'
+    warmup_epochs: 5         # Longer warmup for larger images
+    min_lr: 0.00001
+
+# Contrastive Learning (Optimized for STL-10)
+contrastive:
+  enabled: true
+  temperature: 0.5           # Standard SimCLR temperature
+  pretrain_epochs: 100       # Longer pretraining with more data
+  instance_weight: 1.0
+  cluster_weight: 0.5        # Stronger cluster loss for natural images
+  projection_hidden_dim: 2048  # Larger projection head
+
+# Confidence Filtering
+confidence:
+  enabled: true
+  threshold: 0.5             # Higher threshold (better features expected)
+  soft_filtering: true
+  warmup_iterations: 3
+
+# Clustering
+clustering:
+  n_clusters: 10
+  use_gpu_clustering: true
+  max_iter: 300
+  n_init: 20
+
+# Convergence
+convergence:
+  label_stability_threshold: 0.98
+  early_stopping: false
+  patience: 10
+  min_iterations: 15
+
+# Evaluation
+evaluation:
+  eval_every_iteration: true
+  save_best_model: true
+  compute_tsne: false
+
+# Success Criteria (STL-10 targets)
+success_criteria:
+  accuracy: 0.75             # 75% accuracy target
+  nmi: 0.70                  # Higher NMI expected
+  purity: 0.80               # Higher purity expected
+  min_per_class_f1: 0.65     # Minimum per-class F1
+
+# Paths
+paths:
+  checkpoint_dir: './checkpoints_stl10'
+  results_dir: './results_stl10'
+  logs_dir: './logs_stl10'
+
+# Reproducibility
+seed: 42
+
+# Device
+device: 'cuda'
+
+# GPU Optimization (RTX 3060 12GB + WSL2)
+gpu:
+  mixed_precision: true        # FP16 학습으로 메모리 절약 (필수!)
+  cudnn_benchmark: true        # cuDNN 자동 최적화
+  gradient_accumulation: 4     # 효과적 batch_size = 128 * 4 = 512 (대조학습에 중요)
+  empty_cache_freq: 5          # 더 자주 캐시 비우기 (큰 이미지)
+  memory_efficient: true       # 메모리 효율 모드

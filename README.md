@@ -1,61 +1,96 @@
-# Self-Supervised Image Classification for Fashion-MNIST
+# Self-Supervised Image Classification with Contrastive Learning
 
-PyTorch implementation of self-supervised image classification using iterative pseudo-labeling and feature refinement.
+PyTorch implementation of self-supervised image classification using contrastive learning and iterative pseudo-labeling on STL-10 dataset.
 
 ## 🎯 Project Goal
 
-Build a classification system that learns to categorize Fashion-MNIST images **without using ground-truth labels during training**, achieving >70% accuracy through self-supervised learning.
+Build a classification system that learns to categorize images **without using ground-truth labels during training**, achieving >70% accuracy through self-supervised learning with contrastive pre-training.
 
-## 📊 Approach
+## 📊 Current Dataset: STL-10
 
-**Iterative Pseudo-Labeling Strategy:**
-1. **Feature Extraction**: CNN extracts 256-dim features from images
-2. **Clustering**: K-means groups similar images → pseudo-labels
-3. **Classifier Training**: Train on pseudo-labels for 50 epochs
-4. **Feature Refinement**: Improved features → better clustering
-5. **Repeat**: Iterate until pseudo-labels stabilize
+**STL-10** is the primary dataset for this project - specifically designed for self-supervised learning:
+- **96×96 RGB** images (vs 28×28 grayscale in Fashion-MNIST)
+- **10 classes**: airplane, bird, car, cat, deer, dog, horse, monkey, ship, truck
+- **100,000 unlabeled images** for contrastive learning
+- **5,000 training + 8,000 test** labeled images for evaluation
+
+### Why STL-10?
+✅ **High resolution** → More discriminative features
+✅ **RGB colors** → Can use color augmentation (jittering)
+✅ **Distinct classes** → Visually different objects (vs similar clothing items)
+✅ **Unlabeled data** → Ideal for contrastive learning (100k images!)
+✅ **Standard benchmark** → Used in self-supervised learning research
+
+*Note: Fashion-MNIST support is still available but STL-10 is recommended.*
 
 ## 🏗️ Architecture
 
+### Overall Pipeline
 ```
-Input (28×28) → Feature Extractor (CNN) → 256-dim features (L2-normalized)
-                                            ↓
-                                      K-means Clustering
-                                            ↓
-                                      Pseudo-labels (0-9)
-                                            ↓
-                            Classification Head → Class Predictions
+Phase 0: Contrastive Pre-training (100k unlabeled images)
+  ↓
+Phase 1-N: Iterative Pseudo-Labeling
+  Feature Extraction → Clustering → Classifier Training → Repeat
 ```
 
-**Feature Extractor:**
-- 3 Conv blocks: 32 → 64 → 128 channels
+### Contrastive Pre-training (SimCLR-style)
+```
+Image → [Augmentation 1] → View 1 ─┐
+                                     ├→ Contrastive Loss → Learn Features
+Image → [Augmentation 2] → View 2 ─┘
+
+Augmentations: RandomResizedCrop, ColorJitter, Flip, Blur, Rotation
+Temperature: 0.5 | Epochs: 100 | Unlabeled: 100k images
+```
+
+### Iterative Pseudo-Labeling
+```
+Input (96×96 RGB) → STL10Encoder (CNN) → 512-dim features (L2-normalized)
+                                             ↓
+                                       K-means Clustering
+                                             ↓
+                                       Pseudo-labels (0-9)
+                                             ↓
+                             Classification Head → Class Predictions
+```
+
+### STL10Encoder Architecture
+- **4 Conv blocks**: 64 → 128 → 256 → 512 channels
 - BatchNorm + ReLU + MaxPool
-- FC layers: 1152 → 512 → 256
-- L2 normalization (critical for clustering stability)
-
-**Classifier:**
-- Feature Extractor + Classification Head (256 → 128 → 10)
-- Trained end-to-end with pseudo-labels
+- Global Average Pooling
+- Output: 512-dim L2-normalized features
+- **Parameters**: 4.7M
 
 ## 📁 Project Structure
 
 ```
 toy/
 ├── config/
-│   └── config.yaml              # Hyperparameters
+│   ├── stl10_config.yaml        # STL-10 configuration (default)
+│   └── config.yaml              # Fashion-MNIST configuration
+├── dataset/
+│   ├── STL10/                   # STL-10 dataset
+│   │   ├── train_images/        # 5,000 images
+│   │   ├── test_images/         # 8,000 images
+│   │   └── unlabeled_images/    # 100,000 images (contrastive learning)
+│   └── FashionMNIST/           # Fashion-MNIST dataset (legacy)
 ├── models/
-│   ├── feature_extractor.py     # CNN feature extractor
-│   └── classifier.py            # Complete classification model
+│   ├── stl10_encoder.py        # STL-10 encoder (96×96 RGB)
+│   ├── feature_extractor.py    # Fashion-MNIST encoder (28×28 grayscale)
+│   ├── classifier.py           # Classification head
+│   └── contrastive.py          # Contrastive learning components
 ├── utils/
-│   ├── data_loader.py           # Fashion-MNIST data loading
-│   ├── clustering.py            # K-means with GPU support
-│   ├── metrics.py               # Hungarian matching, NMI, Purity
-│   └── visualization.py         # Plotting utilities
-├── train.py                     # Main training script
-├── evaluate.py                  # Evaluation script
-├── inference.py                 # Single image prediction
-├── requirements.txt             # Dependencies
-└── README.md                    # This file
+│   ├── stl10_loader.py         # STL-10 data loading
+│   ├── stl10_augmentation.py   # RGB image augmentations
+│   ├── data_loader.py          # Fashion-MNIST data loading
+│   ├── augmentation_v2.py      # Fashion-MNIST augmentations
+│   ├── clustering.py           # K-means with GPU support
+│   ├── metrics.py              # Hungarian matching, NMI, Purity
+│   └── visualization.py        # Plotting utilities
+├── train.py                    # Main training script (auto-detects dataset)
+├── CHANGES.md                  # Recent changes and migration guide
+├── STL10_SETUP.md             # Detailed STL-10 setup guide
+└── README.md                   # This file
 ```
 
 ## 🚀 Quick Start
@@ -63,7 +98,7 @@ toy/
 ### 1. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install torch torchvision pyyaml scikit-learn scipy tqdm pillow kaggle
 ```
 
 **Optional (Recommended):** Install FAISS for GPU-accelerated clustering:
@@ -71,154 +106,219 @@ pip install -r requirements.txt
 pip install faiss-gpu
 ```
 
-### 2. Train the Model
+### 2. Download STL-10 Dataset
+
+Already downloaded and placed in `dataset/STL10/`!
+
+To download manually:
+```bash
+kaggle datasets download -d jessicali9530/stl10
+unzip stl10.zip -d dataset/STL10/
+```
+
+### 3. Train the Model
 
 ```bash
 python train.py
 ```
 
-**Configuration:** Edit `config/config.yaml` to adjust hyperparameters:
-- `num_iterations`: Number of refinement cycles (default: 10)
-- `epochs_per_iteration`: Classifier training epochs (default: 50)
-- `batch_size`: Batch size (default: 128)
-- `learning_rate`: Learning rate (default: 0.001)
+The script automatically:
+- Loads `config/stl10_config.yaml`
+- Runs contrastive pre-training on 100k unlabeled images (100 epochs)
+- Performs iterative pseudo-labeling (30 iterations)
+- Saves checkpoints to `checkpoints_stl10/`
 
-### 3. Evaluate
+**Configuration:** Edit `config/stl10_config.yaml` to adjust:
+- `pretrain_epochs`: Contrastive pre-training epochs (default: 100)
+- `num_iterations`: Refinement cycles (default: 30)
+- `epochs_per_iteration`: Classifier training epochs (default: 15)
+- `batch_size`: Batch size (default: 256)
+- `temperature`: Contrastive learning temperature (default: 0.5)
+
+### 4. Monitor Training
 
 ```bash
-python evaluate.py --checkpoint checkpoints/final_model.pth --verbose
-```
-
-### 4. Inference on Single Image
-
-```bash
-python inference.py --image path/to/image.png --checkpoint checkpoints/final_model.pth
+# Training creates these directories:
+checkpoints_stl10/  # Model checkpoints
+results_stl10/      # Results and plots
+logs_stl10/         # Training logs
 ```
 
 ## 📈 Expected Performance
 
+### STL-10 (Current)
 | Iteration | Accuracy | NMI | Purity | Status |
 |-----------|----------|-----|--------|--------|
-| 1 | 30-40% | 0.35-0.45 | 0.40-0.50 | Baseline |
-| 2-3 | 50-60% | 0.50-0.60 | 0.60-0.70 | Improving |
-| 4-6 | 65-75% | 0.60-0.70 | 0.70-0.80 | Approaching target |
-| 7+ | **70-80%** | **0.65+** | **0.75+** | **Target achieved** |
+| 1 | 45-55% | 0.45-0.55 | 0.50-0.60 | Post contrastive learning |
+| 5-10 | 60-70% | 0.55-0.65 | 0.65-0.75 | Improving |
+| 15-20 | **70-80%** | **0.65-0.75** | **0.75-0.85** | **Target** |
+| 25-30 | **75-85%** | **0.70-0.80** | **0.80-0.90** | **Converged** |
+
+### Fashion-MNIST (Legacy - Not Recommended)
+| Iteration | Accuracy | NMI | Purity | Status |
+|-----------|----------|-----|--------|--------|
+| Final | 30-40% | 0.25-0.35 | 0.30-0.40 | Limited by dataset |
+
+**Why Fashion-MNIST struggles:**
+- ❌ Low resolution (28×28)
+- ❌ Grayscale only (no color augmentation)
+- ❌ Similar classes (T-shirt vs Shirt vs Pullover)
+- ❌ No unlabeled data for contrastive learning
 
 ## ✅ Success Criteria
 
-- ✅ **Overall Accuracy > 70%** (vs supervised ~90%, k-means only ~40-50%)
-- ✅ **NMI > 0.65** (clustering-class alignment)
-- ✅ **Purity > 0.75** (cluster homogeneity)
-- ✅ **All Per-Class F1 > 0.60** (no class left behind)
-- ✅ **Label Stability > 0.95** (convergence)
+### STL-10 Targets
+- ✅ **Overall Accuracy > 75%** (vs supervised ~94%)
+- ✅ **NMI > 0.70** (clustering-class alignment)
+- ✅ **Purity > 0.80** (cluster homogeneity)
+- ✅ **All Per-Class F1 > 0.65** (no class left behind)
+- ✅ **Label Stability > 0.98** (convergence)
 
 ## 🔑 Key Implementation Details
 
-### 1. L2 Feature Normalization (Critical!)
+### 1. Contrastive Pre-training (Critical!)
+```python
+# Two augmented views of same image
+view1, view2 = augment(image), augment(image)
+
+# Project to contrastive space
+z1, z2 = projector(encoder(view1)), projector(encoder(view2))
+
+# NT-Xent Loss (Temperature-scaled)
+loss = -log(exp(sim(z1, z2) / τ) / Σ exp(sim(z1, zk) / τ))
+```
+- Learns invariant features before clustering
+- Uses 100k unlabeled STL-10 images
+- Temperature τ = 0.5 for balanced learning
+
+### 2. Strong Augmentation for RGB
+```python
+RandomResizedCrop(96, scale=(0.2, 1.0))  # SimCLR-style
+ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1)  # RGB!
+RandomHorizontalFlip(p=0.5)  # OK for natural images
+GaussianBlur(kernel_size=9, p=0.5)
+RandomRotation(degrees=15)
+```
+
+### 3. L2 Feature Normalization
 ```python
 features = F.normalize(features, p=2, dim=1)
 ```
-- Ensures distance-based clustering focuses on direction, not magnitude
-- Applied before every clustering operation
+- Applied after encoder, before clustering
+- Ensures cosine similarity clustering
 
-### 2. Hungarian Algorithm for Evaluation
+### 4. Hungarian Algorithm for Evaluation
 ```python
 from scipy.optimize import linear_sum_assignment
 mapping, accuracy = compute_cluster_to_class_mapping(pseudo_labels, true_labels)
 ```
-- Cluster IDs (0-9) don't match class IDs → need optimal mapping
-- Maximizes agreement between predicted clusters and true classes
+- Optimal cluster-to-class assignment
+- Cluster IDs don't match class IDs
 
-### 3. GPU-Accelerated Clustering
-- **FAISS** (recommended): 10x faster than sklearn for 60K samples
+### 5. GPU-Accelerated Clustering
+- **FAISS** (recommended): 10x faster for 100k samples
 - **Fallback**: sklearn K-means if FAISS unavailable
-
-### 4. Convergence Detection
-```python
-stability = 1.0 - (changed_labels / total_labels)
-if stability > 0.95:
-    break  # Pseudo-labels have stabilized
-```
 
 ## 📊 Outputs
 
-### Checkpoints
-- `checkpoints/best_model.pth`: Model with highest test accuracy
-- `checkpoints/final_model.pth`: Final model after all iterations
-- `checkpoints/model_iter_*.pth`: Per-iteration checkpoints
+### Checkpoints (STL-10)
+- `checkpoints_stl10/best_model.pth`: Model with highest test accuracy
+- `checkpoints_stl10/final_model.pth`: Final model after all iterations
+- `checkpoints_stl10/model_iter_*.pth`: Per-iteration checkpoints
 
 ### Results
-- `results/training_history.npy`: Metrics across iterations
-- `results/confusion_matrix.png`: Final confusion matrix
-- `results/clustering_quality.png`: NMI/Purity over iterations
-- `results/training_progress.png`: Comprehensive training plots
+- `results_stl10/training_history.npy`: Metrics across iterations
+- `results_stl10/confusion_matrix.png`: Final confusion matrix
+- `results_stl10/clustering_quality.png`: NMI/Purity over iterations
+
+## 🔄 Switching Between Datasets
+
+### Use STL-10 (Default)
+```bash
+python train.py  # Uses config/stl10_config.yaml
+```
+
+### Use Fashion-MNIST
+Edit `train.py` line 303:
+```python
+config = load_config('config/config.yaml')  # Change from stl10_config.yaml
+```
+
+Or edit config file's `dataset_name`:
+```yaml
+data:
+  dataset_name: 'fashion_mnist'  # or 'stl10'
+```
 
 ## 🛠️ Troubleshooting
 
-### Poor Initial Clustering (Accuracy ~20-30% at Iteration 1)
-- **Solution**: Features are random → Normal! Should improve by Iteration 3
-- **Fix if persistent**: Implement autoencoder pre-training (in `models/autoencoder.py`)
+### CUDA Out of Memory
+**Solution**: Reduce batch size in `stl10_config.yaml`:
+```yaml
+data:
+  batch_size: 128  # or 64 instead of 256
+```
 
-### Clusters Form by Color/Texture Instead of Shape
-- **Solution**: Strengthen data augmentation in `utils/data_loader.py`
-- Add color jitter, increase rotation range
+### Slow Contrastive Pre-training
+**Solution**: Reduce pre-training epochs:
+```yaml
+contrastive:
+  pretrain_epochs: 50  # instead of 100
+```
 
-### Training Unstable (Loss oscillates)
-- **Solution**: Reduce learning rate (0.001 → 0.0005)
-- Enable label smoothing: `nn.CrossEntropyLoss(label_smoothing=0.1)`
+### Poor Clustering Quality (NMI < 0.4)
+**Solution**:
+1. Increase contrastive pre-training epochs
+2. Check if contrastive loss is decreasing
+3. Verify augmentations are working (views should be different)
 
-### Slow Clustering (>5 min per iteration)
-- **Solution**: Install FAISS (`pip install faiss-gpu`)
-- Or reduce `n_init` in `config/config.yaml` (20 → 10)
+## 📚 STL-10 Classes
 
-## 📚 Fashion-MNIST Classes
-
-0. T-shirt/top
-1. Trouser
-2. Pullover
-3. Dress
-4. Coat
-5. Sandal
-6. Shirt
-7. Sneaker
-8. Bag
-9. Ankle boot
+0. Airplane ✈️
+1. Bird 🐦
+2. Car 🚗
+3. Cat 🐱
+4. Deer 🦌
+5. Dog 🐕
+6. Horse 🐴
+7. Monkey 🐵
+8. Ship 🚢
+9. Truck 🚚
 
 ## 🔬 Technical Details
 
-**Why Self-Supervised?**
-- Real-world scenarios often lack labeled data
-- Demonstrates unsupervised feature learning capability
-- Iterative refinement mimics human learning
+**Why Contrastive Learning?**
+- Pre-trains encoder on large unlabeled data (100k images)
+- Learns invariant features before clustering
+- Significantly improves initial clustering quality
 
-**Why Iterative Pseudo-Labeling?**
-- Single clustering on random features → poor results (~40%)
-- Training improves features → better clustering → better features
-- Virtuous cycle: each iteration refines both features and labels
+**Why STL-10 over Fashion-MNIST?**
+- Higher resolution enables more discriminative features
+- RGB colors enable color-based augmentation
+- Visually distinct classes are easier to cluster
+- 100k unlabeled images perfect for contrastive learning
 
 **Key Hyperparameters:**
-- `feature_dim=256`: Feature vector size
-- `n_clusters=10`: Must match number of true classes
-- `recluster_interval=10`: Re-cluster every N epochs (within iteration)
-- `convergence_threshold=0.95`: Stop when labels stabilize
+- `feature_dim=512`: Feature vector size (increased from 256)
+- `temperature=0.5`: Contrastive learning temperature
+- `pretrain_epochs=100`: Contrastive pre-training duration
+- `projection_dim=128`: Contrastive projection head output
 
 ## 📖 References
 
-- Architecture inspired by: [Deep Clustering](https://arxiv.org/abs/1807.05520)
+- Contrastive Learning: [SimCLR (Chen et al., 2020)](https://arxiv.org/abs/2002.05709)
+- STL-10 Dataset: [Coates et al., 2011](https://cs.stanford.edu/~acoates/stl10/)
+- Deep Clustering: [Caron et al., 2018](https://arxiv.org/abs/1807.05520)
 - Hungarian Algorithm: [scipy.optimize.linear_sum_assignment](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html)
-- Fashion-MNIST: [Xiao et al., 2017](https://arxiv.org/abs/1708.07747)
 
-## 📄 License
+## 📄 Additional Documentation
 
-This project is part of a deep learning research implementation.
-
-## 🙋 Support
-
-For issues or questions:
-1. Check `documents/architecture.md` for detailed architecture description
-2. Review hyperparameters in `config/config.yaml`
-3. Examine training logs in `logs/` directory
+- **`STL10_SETUP.md`**: Detailed STL-10 setup and usage guide
+- **`CHANGES.md`**: Recent changes and migration guide from Fashion-MNIST
+- **`config/stl10_config.yaml`**: All hyperparameters with comments
 
 ---
 
-**Built with PyTorch** | Self-Supervised Learning | Iterative Pseudo-Labeling
+**Built with PyTorch** | **Self-Supervised Learning** | **Contrastive Pre-training** | **STL-10 Dataset**
+
+Last Updated: 2025-12-07 | Project migrated from Fashion-MNIST to STL-10 for better performance
